@@ -1,0 +1,20 @@
+{
+  "PORT": 7893,
+  "CHECK_INTERVAL": 5000,
+  "SERVER_BASE_HOST": "",
+  "OBICO_ML_API_HOST": "",
+  "PRINTERS": [
+    {
+      "LABEL": "Creality Ender-3 S1",
+      "MOONRAKER_API_HOST": "",
+      "CAMERA_SNAPSHOT_URL": ".../webcam?action=snapshot",
+      "NOTIFICATION_WEBHOOK_URL": ""
+    },
+    {
+      "LABEL": "Creality K1",
+      "MOONRAKER_API_HOST": "",
+      "CAMERA_SNAPSHOT_URL": ".../webcam?action=snapshot",
+      "NOTIFICATION_WEBHOOK_URL": ""
+    }
+  ]
+}

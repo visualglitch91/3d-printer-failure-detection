@@ -4,20 +4,19 @@ import express from "express";
 import fetch from "node-fetch";
 import { createCanvas, loadImage } from "canvas";
 import fs from "fs-extra";
-import "dotenv/config";
+import config from "./config.json" assert { type: "json" };
 
-const moonrakerApiHost = process.env.MOONRAKER_API_HOST;
-const obicoMlApiHost = process.env.OBICO_ML_API_HOST;
-const cameraSnapshotUrl = process.env.CAMERA_SNAPSHOT_URL;
-const notificationWebhookUrl = process.env.NOTIFICATION_WEBHOOK_URL;
-const serverBaseHost = process.env.SERVER_BASE_HOST;
-const checkInterval = parseInt(process.env.CHECK_INTERVAL, 10);
-const port = parseInt(process.env.PORT, 10);
+const printers = config.PRINTERS;
+const obicoMlApiHost = config.OBICO_ML_API_HOST;
+const serverBaseHost = config.SERVER_BASE_HOST;
+const checkInterval = parseInt(config.CHECK_INTERVAL, 10);
+const port = parseInt(config.PORT, 10);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicFolderPath = path.join(__dirname, "failures");
 
-let hasFailed = false;
+let isPrinting = new Array(printers.length).fill(false);
+let hasFailed = new Array(printers.length).fill(false);
 
 // Ensure the public folder exists
 fs.ensureDirSync(publicFolderPath);
@@ -31,7 +30,9 @@ const server = app.listen(port, "0.0.0.0", () => {
   console.log(`Server is running on port ${port}`);
 });
 
-async function checkPrinterStatus() {
+async function checkPrinterStatus(printer) {
+  const moonrakerApiHost = printer.MOONRAKER_API_HOST;
+
   try {
     const response = await fetch(`${moonrakerApiHost}/api/printer`);
     const data = await response.json();
@@ -42,7 +43,7 @@ async function checkPrinterStatus() {
   }
 }
 
-async function drawBoundingBoxes(detections) {
+async function drawBoundingBoxes(cameraSnapshotUrl, detections) {
   try {
     const response = await fetch(cameraSnapshotUrl);
     const buffer = await response.arrayBuffer();
@@ -85,7 +86,10 @@ async function drawBoundingBoxes(detections) {
   }
 }
 
-async function checkForFailures() {
+async function checkForFailures(printer, index) {
+  const cameraSnapshotUrl = printer.CAMERA_SNAPSHOT_URL;
+  const notificationWebhookUrl = printer.NOTIFICATION_WEBHOOK_URL;
+
   try {
     const response = await fetch(
       `${obicoMlApiHost}/p?img=${encodeURIComponent(cameraSnapshotUrl)}`
@@ -103,42 +107,47 @@ async function checkForFailures() {
       }
     }
 
-    if (failureDetected && !hasFailed) {
-      hasFailed = true;
-      const imagePath = await drawBoundingBoxes(detections);
+    if (failureDetected && !hasFailed[index]) {
+      hasFailed[index] = true;
+      const imagePath = await drawBoundingBoxes(cameraSnapshotUrl, detections);
       const imageUrl = `${serverBaseHost}/failures/${path.basename(imagePath)}`;
 
-      console.log("Failure detected", imageUrl);
+      console.log(`${printer.LABEL}: Failure detected`, imageUrl);
+      console.log(JSON.stringify(detections, null, 2));
       await fetch(notificationWebhookUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: "PrintFailure", image: imageUrl }),
       });
-    } else if (!failureDetected && hasFailed) {
-      hasFailed = false;
+    } else if (!failureDetected && hasFailed[index]) {
+      hasFailed[index] = false;
+      console.log(`${printer.LABEL}: Recovered from failure`);
     }
   } catch (error) {
-    console.error("Error checking for failures:", error);
+    console.error(`${printer.LABEL}: Error checking for failures`, error);
   }
 }
 
-let isPrinting = false;
-async function startMonitoring() {
-  const nextIsPrinting = await checkPrinterStatus();
+async function detectionLoop() {
+  for (let index in printers) {
+    const printer = printers[index];
+    const nextIsPrinting = await checkPrinterStatus(printer);
 
-  if (isPrinting !== nextIsPrinting) {
-    isPrinting = nextIsPrinting;
+    if (isPrinting[index] !== nextIsPrinting) {
+      isPrinting[index] = nextIsPrinting;
+      hasFailed[index] = false;
 
-    if (isPrinting) {
-      console.log("Print started");
-      await checkForFailures();
-    } else {
-      console.log("Print stopped");
-      hasFailed = false;
+      console.log(
+        `${printer.LABEL}: Print ${isPrinting[index] ? "started" : "stopped"}`
+      );
+    }
+
+    if (isPrinting[index]) {
+      await checkForFailures(printer, index);
     }
   }
 
-  setTimeout(startMonitoring, checkInterval);
+  setTimeout(detectionLoop, checkInterval);
 }
 
 // Clear the public folder when the app exits
@@ -155,4 +164,4 @@ process.on("SIGINT", cleanUp);
 process.on("SIGTERM", cleanUp);
 
 // Start the monitoring process
-startMonitoring();
+detectionLoop();
