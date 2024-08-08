@@ -9,6 +9,7 @@ import config from "./config.json" assert { type: "json" };
 const printers = config.PRINTERS;
 const obicoMlApiHost = config.OBICO_ML_API_HOST;
 const serverBaseHost = config.SERVER_BASE_HOST;
+const minimumConfidence = config.MINIMUM_CONFIDENCE;
 const checkInterval = parseInt(config.CHECK_INTERVAL, 10);
 const port = parseInt(config.PORT, 10);
 
@@ -101,7 +102,7 @@ async function checkForFailures(printer, index) {
     let failureDetected = false;
 
     for (const detection of detections) {
-      if (detection[0] === "failure") {
+      if (detection[0] === "failure" && detection[1] > minimumConfidence) {
         failureDetected = true;
         break;
       }
